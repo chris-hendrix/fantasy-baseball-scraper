@@ -3,6 +3,9 @@ import numpy as np
 import requests
 import re
 from bs4 import BeautifulSoup
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 SITE_URL = 'https://www.fantasypros.com'
 HITTER_URL = 'https://www.fantasypros.com/mlb/projections/hitters.php?points=E'
