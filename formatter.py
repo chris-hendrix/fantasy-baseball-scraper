@@ -28,7 +28,9 @@ def get_formatted_table(year=None, csv=None, raw_csv=None):
     data = data.sort_values(by='Rank')
     data = data.reset_index()
     data['Rec'] = data.index + 1
+    data['ADP'] = data['ADP'].fillna(999)
     data = data.set_index('Rec')
+
     data = data.drop(axis=1, columns='index')
 
     if year:
