@@ -10,7 +10,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 SITE_URL = 'https://www.fantasypros.com'
 HITTER_URL = 'https://www.fantasypros.com/mlb/projections/hitters.php?points=E'
 PITCHER_URL = 'https://www.fantasypros.com/mlb/projections/pitchers.php?points=E'
-ADP_URL = 'https://www.fantasypros.com/mlb/rankings/overall.php?eligibility=E'
+ADP_URL = 'https://www.fantasypros.com/mlb/adp/overall.php'
+NOTES_URL = 'https://www.fantasypros.com/mlb/notes/draft-overall.php'
 STAT_DELIM = '|'
 
 
@@ -32,20 +33,20 @@ def get_links(url, site=''):
     return pd.Series(links, name='Link')
 
 
-def get_player_info(player):
-    index = re.search('(.*)\)', player).group(1)+')'
-    name = re.search('(.*)\s\(', player).group(1)
-    paren = re.search('\((.*)\)', player).group(1)
+def get_player_info(player, swap=False):
+    index = re.search(r'(.*)\)', player).group(1)+')'
+    name = re.search(r'(.*)\s\(', player).group(1)
+    paren = re.search(r'\((.*)\)', player).group(1)
 
-    status = re.search('\)\s(.*)', player)
+    status = re.search(r'\)\s(.*)', player)
     status = status.group(1) if status else None
 
     # get team and position (logic for free agents)
     team = ''
     pos = ''
     if ' - ' in paren:
-        team = paren.split(' - ')[0]
-        pos = paren.split(' - ')[1]
+        team = paren.split(' - ')[0 if not swap else 1]
+        pos = paren.split(' - ')[1 if not swap else 0]
     else:
         team = 'FA'
         pos = paren
@@ -58,7 +59,7 @@ def get_player_info(player):
     # create info, index, last name
     info = name + " (" + team + ' - ' + pos + ')'
     index = "_".join([name, team])
-    last = re.search('\s(.*)', name).group(1)
+    last = re.search(r'\s(.*)', name).group(1)
     return {
         'Player': player,
         'PlayerInfo': info,
@@ -68,7 +69,7 @@ def get_player_info(player):
         'Team': team,
         'Positions': pos,
         'Status': status
-        }
+    }
 
 
 def get_hitter_table():
@@ -113,7 +114,7 @@ def get_player_table():
     pit = get_pitcher_table()
 
     # append tables
-    play = hit.append(pit)
+    play = hit._append(pit)
 
     # get id from link
     play['ID'] = play['Link'].str.extract('projections/([^/]+).php')
@@ -148,18 +149,12 @@ def get_player_table():
 def get_adp_table():
     # get ADP table
     adp = pd.read_html(ADP_URL)[0]
-
     # rename unnamed columns
     adp = adp.rename(columns={
-        'Player  (Team, Position)': 'Player',
-        'Notes': 'BestADP',
-        'Unnamed: 3': 'WorstADP',
-        'Unnamed: 4': 'AvgADP',
-        'Unnamed: 5': 'StdADP',
-        'Unnamed: 6': 'ADP',
-        'Unnamed: 7': 'vsADP',
-        'Unnamed: 8': 'Notes'
-        })
+        'Player (Team)': 'Player',
+        'AVG': 'ADP'
+    })
+    adp['ADP'] = adp['ADP'].round(0)
 
     # create index column
     adp['Index'] = adp['Player'].apply(lambda x: get_player_info(x)['Index']) 
@@ -170,20 +165,53 @@ def get_adp_table():
 
     # calcualte vsADP
     adp['vsADP'] = adp['ADP'] - adp['Rank']
-
-    # clean Notes
-    adp['Notes'] = adp['Notes'].str.replace('\n', ' ')
-
     return adp
+
+def get_notes_table():
+    response = requests.get(NOTES_URL)
+    html_content = response.content
+    soup = BeautifulSoup(html_content, 'html.parser')
+    players = []
+
+    for row in soup.find_all('tr'):
+        player = {}
+        photo_tag = row.find('img', alt=True)
+        if photo_tag:
+            player['PhotoURL'] = photo_tag['src']
+        
+        name_tag = row.find('a', href=True)
+        if name_tag:
+            player['Player'] = name_tag.text.strip()
+
+        # add position to player
+        subtitle_tag = row.find('span', class_='subtitle')
+        if subtitle_tag:
+            player['Player'] += f" ({subtitle_tag.text.strip()})"
+        
+        note_tag = row.find('div', class_='player-note')
+        if note_tag:
+            player['Notes'] = note_tag.text.strip()
+
+        player['Index'] = get_player_info(player['Player'], swap=True)['Index']
+        
+        if player:
+            players.append(player)
+
+    df = pd.DataFrame(players)
+    df = df.drop_duplicates(subset='Index')
+    df = df.set_index('Index')
+    return df
 
 
 def get_data_table(csv=None):
     # get tables
     play = get_player_table()
     adp = get_adp_table()
+    notes = get_notes_table()
 
     # join tables
-    data = play.join(adp, rsuffix='2')
+    data = play.merge(adp, on='Index', suffixes=('', '_adp'))
+    data = data.merge(notes, on='Index', suffixes=('', '_notes'))
 
     # update positions
     pos = adp['Positions']
@@ -197,7 +225,7 @@ def get_data_table(csv=None):
     # fill null notes with empty string and concat projections
     data['Notes'] = data['Notes'].fillna('')
     data['Description'] = data['Projections'] + '\n' + data['Notes']
-    data = data.reset_index()
+    data = data.reset_index(drop=True)
 
     # get points rank
     data['PtsRank'] = data['PTS'].rank(ascending=False, method='first')
@@ -210,4 +238,5 @@ def get_data_table(csv=None):
 
 
 if __name__ == "__main__":
-    print(get_data_table().head())
+    table = get_data_table()
+    print(table.info())
