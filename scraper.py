@@ -11,7 +11,7 @@ SITE_URL = 'https://www.fantasypros.com'
 HITTER_URL = 'https://www.fantasypros.com/mlb/projections/hitters.php?points=E'
 PITCHER_URL = 'https://www.fantasypros.com/mlb/projections/pitchers.php?points=E'
 ADP_URL = 'https://www.fantasypros.com/mlb/adp/overall.php'
-NOTES_URL = 'https://www.fantasypros.com/mlb/notes/draft-overall.php'
+NOTES_URL = 'https://www.fantasypros.com/mlb/notes/draft-overall.php?eligibility=E'
 STAT_DELIM = '|'
 
 
@@ -163,7 +163,7 @@ def get_adp_table():
     adp = adp.drop_duplicates(subset='Index')
     adp = adp.set_index('Index')
 
-    # calcualte vsADP
+    # calculate vsADP
     adp['vsADP'] = adp['ADP'] - adp['Rank']
     return adp
 
@@ -192,7 +192,8 @@ def get_notes_table():
         if note_tag:
             player['Notes'] = note_tag.text.strip()
 
-        player['Index'] = get_player_info(player['Player'], swap=True)['Index']
+        player = {**player, **get_player_info(player['Player'], swap=True)}
+
         
         if player:
             players.append(player)
@@ -214,10 +215,11 @@ def get_data_table(csv=None):
     data = data.merge(notes, on='Index', suffixes=('', '_notes'))
 
     # update positions
-    pos = adp['Positions']
-    info = adp['PlayerInfo']
+    pos = notes['Positions']
+    info = notes['PlayerInfo']
     data['Positions'].update(pos)
     data['PlayerInfo'].update(info)
+    data['Player'].update(info)
 
     # sort by player rank
     data = data.sort_values(by='Rank')
@@ -238,5 +240,5 @@ def get_data_table(csv=None):
 
 
 if __name__ == "__main__":
-    table = get_data_table()
-    print(table.info())
+    table = get_notes_table()
+    print(table.head(10))
