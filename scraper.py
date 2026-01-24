@@ -161,10 +161,7 @@ def get_adp_table():
     adp['Positions'] = adp['Player'].apply(lambda x: get_player_info(x)['Positions']) 
     adp['PlayerInfo'] = adp['Player'].apply(lambda x: get_player_info(x)['PlayerInfo']) 
     adp = adp.drop_duplicates(subset='Index')
-    adp = adp.set_index('Index')
 
-    # calculate vsADP
-    adp['vsADP'] = adp['ADP'] - adp['Rank']
     return adp
 
 def get_notes_table():
@@ -214,20 +211,24 @@ def get_data_table(csv=None):
     data = play.merge(adp, on='Index', suffixes=('', '_adp'))
     data = data.merge(notes, on='Index', suffixes=('', '_notes'))
 
-    # update positions
-    pos = notes['Positions']
-    info = notes['PlayerInfo']
-    data['Positions'].update(pos)
-    data['PlayerInfo'].update(info)
-    data['Player'].update(info)
+    # update positions from notes table
+    data['Player'] = data['PlayerInfo_notes']
+    data['Positions'] = data['Positions_notes']
+    data['PlayerInfo'] = data['PlayerInfo_notes']
 
-    # sort by player rank
-    data = data.sort_values(by='Rank')
+    # sort by rank
+    data = data.sort_values(by=['Rank'], ascending=True)
 
     # fill null notes with empty string and concat projections
     data['Notes'] = data['Notes'].fillna('')
     data['Description'] = data['Projections'] + '\n' + data['Notes']
     data = data.reset_index(drop=True)
+
+    # update rank based on row index + 1 for shohei
+    data['Rank'] = data.index + 1
+
+    # calculate vsADP
+    data['vsADP'] = data['ADP'] - data['Rank']
 
     # get points rank
     data['PtsRank'] = data['PTS'].rank(ascending=False, method='first')
